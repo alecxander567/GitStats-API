@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ReadmeProfileViewSet, ReadmeStatsCardView, ReadmeLanguagesCardView
+from .views import ReadmeProfileViewSet
+from .readme_cards import ReadmeStatsCardView, ReadmeLanguagesCardView
 
 router = DefaultRouter()
 router.register(r"profile", ReadmeProfileViewSet, basename="readme-profile")
