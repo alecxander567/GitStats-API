@@ -13,17 +13,19 @@ class ReadmeGenerator:
         self.data = {}
 
     def get_github_username(self):
-        """Get the correct GitHub username for the user, or None if we
-        don't have a real one on file. Never falls back to
-        self.user.username, since that can be a 'github_<id>' placeholder
-        that breaks every GitHub badge/API URL built from it."""
+        """Get the real GitHub login for the user, or None if we don't
+        have one on file.
+
+        display_name is a human display name (can contain spaces,
+        parentheses, etc., e.g. "EXPN (Exp)") and must NEVER be used as
+        a username - it isn't a valid GitHub handle and breaks every
+        badge/API URL built from it. Likewise, self.user.username can be
+        a synthetic 'github_<id>' placeholder and is never a safe
+        fallback either.
+        """
         if hasattr(self.user, "github_username") and self.user.github_username:
             if not self.user.github_username.startswith("github_"):
                 return self.user.github_username
-
-        if self.user.display_name and not self.user.display_name.startswith("github_"):
-            return self.user.display_name
-
         return None
 
     def gather_data(self):
