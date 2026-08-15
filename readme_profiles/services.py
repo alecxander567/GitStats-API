@@ -178,6 +178,50 @@ class ReadmeGenerator:
                     resolved[key] = bool(profile_settings[key])
         return resolved
 
+    def _card_base_url(self):
+        return getattr(settings, "SITE_URL", "https://gitstats-api-1i3g.onrender.com")
+
+    def _build_cards_section(self, show_settings):
+        """Build the stats + languages SVG cards as a single responsive
+        block.
+
+        No <style>/media-query CSS is used because GitHub's README
+        sanitizer strips it anyway. Instead this relies on plain HTML
+        inline-image wrapping: two <img> tags with percentage widths,
+        placed on the SAME line (no blank line between them) behave like
+        inline text and wrap onto their own line whenever the viewport
+        is too narrow to fit both - side-by-side on desktop, stacked on
+        mobile, with zero CSS.
+        """
+        username = self.get_github_username()
+        if not username:
+            return ""
+
+        base_url = self._card_base_url()
+        imgs = []
+
+        if show_settings.get("show_stats", True):
+            stats_url = (
+                f"{base_url}/api/readme-profile/readme-card/stats/"
+                f"?username={username}"
+            )
+            imgs.append(f'<img src="{stats_url}" alt="GitHub Stats" width="48%" />')
+
+        if show_settings.get("show_activity_chart", True):
+            lang_url = (
+                f"{base_url}/api/readme-profile/readme-card/languages/"
+                f"?username={username}"
+            )
+            imgs.append(f'<img src="{lang_url}" alt="Top Languages" width="48%" />')
+
+        if not imgs:
+            return ""
+
+        # Single space between the <img> tags (not a newline) - this is
+        # what keeps them inline so they can wrap independently.
+        cards_line = " ".join(imgs)
+        return f'<div align="center">\n\n{cards_line}\n\n</div>'
+
     def replace_placeholders(self, content, show_settings=None):
         """Replace placeholders in markdown content with actual data"""
         show_settings = show_settings or self.DEFAULT_SETTINGS
@@ -307,27 +351,10 @@ class ReadmeGenerator:
             "{{current_year}}", str(data.get("current_year", timezone.now().year))
         )
 
-        # Stats card image - our own self-hosted SVG, not a third-party service
-        username = self.get_github_username()
-        if show_settings.get("show_stats", True) and username:
-            base_url = getattr(
-                settings, "SITE_URL", "https://gitstats-api-1i3g.onrender.com"
-            )
-            stats_card_url = (
-                f"{base_url}/api/readme-profile/readme-card/stats/?username={username}"
-            )
-            content = content.replace("{{stats_card_url}}", stats_card_url)
-        else:
-            stats_card_url = None
-            # Either stats are turned off, or no valid username - drop the
-            # whole image line rather than rendering a broken/empty src.
-            content = re.sub(r"!\[[^\]]*\]\(\{\{stats_card_url\}\}\)\n?", "", content)
-
-        # Also normalize/strip any stats card image that's already baked
-        # into content from a prior generation (the {{stats_card_url}}
-        # token above won't exist anymore once content has been
-        # generated once, so that replace() alone is a no-op on it).
-        content = self._normalize_stats_card_image(content, stats_card_url)
+        # Cards section (stats + languages SVGs, side-by-side/responsive)
+        if "{{cards_section}}" in content:
+            cards_html = self._build_cards_section(show_settings)
+            content = content.replace("{{cards_section}}", cards_html)
 
         return content
 
@@ -347,11 +374,8 @@ class ReadmeGenerator:
 
     @staticmethod
     def _strip_previous_activity_chart(content):
-        """Same idea as _strip_previous_badges, but for the appended
-        'Top Languages' image chart. Also cleans up stale copies left
-        over from before the /api/readme-profile/ URL prefix fix, since
-        those won't match the freshly-built URL and would otherwise
-        linger alongside the corrected one forever."""
+        """Removes an old-style appended 'Top Languages' image block
+        (from before cards were merged into one responsive section)."""
         pattern = re.compile(
             r'<div align="center">\s*\n\n!\[Top Languages\]\([^)]*\)\s*\n\n</div>\s*\n*',
             re.DOTALL,
@@ -359,15 +383,28 @@ class ReadmeGenerator:
         return pattern.sub("", content)
 
     @staticmethod
-    def _normalize_stats_card_image(content, new_url):
-        """Fix up an already-baked '![GitHub Stats](...)' line in stored
-        content to point at the current, correct URL - or strip it if
-        stats are disabled / there's no username. Needed because once
-        content has been generated once, {{stats_card_url}} no longer
-        exists in it for replace_placeholders() to substitute into."""
-        pattern = re.compile(r"!\[GitHub Stats\]\([^)]*\)")
-        if new_url:
-            return pattern.sub(f"![GitHub Stats]({new_url})", content)
+    def _strip_previous_stats_image(content):
+        """Removes an old-style lone '![GitHub Stats](...)' line (from
+        before cards were merged into one responsive section)."""
+        pattern = re.compile(r"!\[GitHub Stats\]\([^)]*\)\n?")
+        return pattern.sub("", content)
+
+    @staticmethod
+    def _strip_previous_cards_section(content):
+        """Removes a previously-generated responsive cards block (two
+        <img> tags for stats/languages) so regenerating doesn't stack a
+        second copy underneath the first."""
+        pattern = re.compile(
+            r'<div align="center">\s*\n\n'
+            r'(?:<img[^>]*alt="GitHub Stats"[^>]*/>\s*'
+            r'<img[^>]*alt="Top Languages"[^>]*/>|'
+            r'<img[^>]*alt="Top Languages"[^>]*/>\s*'
+            r'<img[^>]*alt="GitHub Stats"[^>]*/>|'
+            r'<img[^>]*alt="GitHub Stats"[^>]*/>|'
+            r'<img[^>]*alt="Top Languages"[^>]*/>)'
+            r"\s*\n\n</div>\s*\n*",
+            re.DOTALL,
+        )
         return pattern.sub("", content)
 
     @staticmethod
@@ -404,18 +441,6 @@ class ReadmeGenerator:
             return f'<div align="center">\n\n{badges_line}\n\n</div>'
         except Exception:
             return ""
-
-    def generate_activity_chart(self):
-        """Embed our own languages card instead of a third-party image
-        service - built from the same data we already have, served from
-        our own domain, no external lookups that can 404."""
-        username = self.get_github_username()
-        if not username:
-            return ""
-        base_url = getattr(
-            settings, "SITE_URL", "https://gitstats-api-1i3g.onrender.com"
-        )
-        return f'<div align="center">\n\n![Top Languages]({base_url}/api/readme-profile/readme-card/languages/?username={username})\n\n</div>'
 
     def get_user_content(self):
         """Get the user's content from their profile or use default"""
@@ -461,16 +486,29 @@ class ReadmeGenerator:
             else:
                 content = self.get_user_content()
 
-            # Replace placeholders (this now also honors show_stats /
-            # show_languages / show_contributions and strips the
-            # corresponding lines when turned off)
+            # Must check for the placeholder BEFORE replace_placeholders
+            # runs - it always removes {{cards_section}} if present, so
+            # checking membership afterward would incorrectly say "no
+            # placeholder" even when one was there and got filled in,
+            # causing the legacy-insert branch below to fire every time
+            # and duplicate the cards.
+            had_cards_placeholder = "{{cards_section}}" in content
+
+            # Replace placeholders (this also honors show_stats /
+            # show_languages / show_contributions / show_activity_chart
+            # and builds the responsive {{cards_section}} block)
             content = self.replace_placeholders(content, show_settings)
 
-            # Strip any badges/chart blocks already baked in from a prior
-            # generation before re-adding fresh ones below, so repeated
-            # regenerate() calls don't keep stacking duplicates.
+            # Strip anything already baked in from a prior generation
+            # before re-adding fresh ones below, so repeated
+            # regenerate() calls don't keep stacking duplicates. This
+            # also cleans up old-format blocks (single stats image +
+            # separately appended languages chart) left over from before
+            # the two cards were merged into one responsive section.
             content = self._strip_previous_badges(content)
             content = self._strip_previous_activity_chart(content)
+            content = self._strip_previous_stats_image(content)
+            content = self._strip_previous_cards_section(content)
 
             # If there's no real GitHub username on file, any stats/chart
             # image embedded in the template body would otherwise render
@@ -485,15 +523,19 @@ class ReadmeGenerator:
                 if badges:
                     content = badges + "\n\n" + content
 
-            # Add activity chart - honor show_activity_chart. This was
-            # previously appended unconditionally, which is why disabling
-            # it in profile settings never actually removed it, and why
-            # it duplicated the plain-text {{languages.top_5}} list that's
-            # already in the default template body.
-            if show_settings.get("show_activity_chart", True):
-                chart = self.generate_activity_chart()
-                if chart:
-                    content += "\n\n" + chart
+            # Re-insert the responsive cards section. If the template had
+            # a {{cards_section}} placeholder it's already been filled in
+            # by replace_placeholders(); this branch only fires for
+            # legacy already-generated content that predates the
+            # placeholder, where we drop the cards under the
+            # "## GitHub Stats" heading if present, else at the top.
+            cards_html = self._build_cards_section(show_settings)
+            if cards_html and not had_cards_placeholder:
+                marker = "## GitHub Stats"
+                if marker in content:
+                    content = content.replace(marker, marker + "\n\n" + cards_html, 1)
+                else:
+                    content = cards_html + "\n\n" + content
 
             return content
         except Exception:
@@ -526,7 +568,7 @@ Welcome to my GitHub profile!
 
 ## GitHub Stats
 
-![GitHub Stats]({{stats_card_url}})
+{{cards_section}}
 
 ### Activity Summary
 
