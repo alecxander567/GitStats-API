@@ -12,6 +12,7 @@ from .serializers import (
     ProjectCategoryStatsSerializer,
 )
 from repositories.models import Repository
+from .services import CategoryService  # Add this import
 
 
 class ProjectCategoryViewSet(viewsets.ModelViewSet):
@@ -121,6 +122,30 @@ class ProjectCategoryViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=False, methods=["post"], permission_classes=[IsAuthenticated])
+    def sync(self, request):
+        """
+        Sync all repositories with categories.
+        Auto-categorize all repositories based on their technology stack.
+        """
+        try:
+            service = CategoryService()
+            count = service.categorize_all_repositories()
+
+            return Response(
+                {
+                    "status": "success",
+                    "count": count,
+                    "message": f"Successfully categorized {count} repositories",
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response(
+                {"status": "error", "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     @action(detail=False, methods=["get"])
     def stats(self, request):
