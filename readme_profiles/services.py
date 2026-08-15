@@ -10,6 +10,14 @@ from analytics.models import ContributorActivity
 class ReadmeGenerator:
     """Service for generating README content with dynamic data"""
 
+    DEFAULT_SETTINGS = {
+        "show_stats": True,
+        "show_languages": True,
+        "show_contributions": True,
+        "show_activity_chart": True,
+        "show_badges": True,
+    }
+
     def __init__(self, user):
         self.user = user
         self.data = {}
@@ -47,7 +55,7 @@ class ReadmeGenerator:
                 "followers": self.user.followers or 0,
                 "following": self.user.following or 0,
             }
-        except Exception as e:
+        except Exception:
             # Fallback user data
             self.data["user"] = {
                 "name": github_username or self.user.username,
@@ -75,7 +83,7 @@ class ReadmeGenerator:
                 "public_repos": repos.filter(visibility="public").count(),
                 "private_repos": repos.filter(visibility="private").count(),
             }
-        except Exception as e:
+        except Exception:
             # Fallback stats
             self.data["stats"] = {
                 "total_repos": 0,
@@ -101,7 +109,7 @@ class ReadmeGenerator:
             self.data["languages"] = [
                 {"name": lang, "count": count} for lang, count in sorted_languages
             ]
-        except Exception as e:
+        except Exception:
             self.data["languages"] = []
 
         try:
@@ -119,7 +127,7 @@ class ReadmeGenerator:
                 }
                 for repo in repos
             ]
-        except Exception as e:
+        except Exception:
             self.data["top_repos"] = []
 
         try:
@@ -143,7 +151,7 @@ class ReadmeGenerator:
                     "issues": total_issues,
                 }
             }
-        except Exception as e:
+        except Exception:
             self.data["contributions"] = {
                 "last_30_days": {
                     "commits": 0,
@@ -158,11 +166,25 @@ class ReadmeGenerator:
 
         return self.data
 
-    def replace_placeholders(self, content):
+    def _resolve_settings(self, profile_settings):
+        """Merge whatever is stored on the profile with defaults so a
+        missing key never silently means 'show everything', and a caller
+        that doesn't pass settings at all still gets the old always-on
+        behavior (backwards compatible)."""
+        resolved = dict(self.DEFAULT_SETTINGS)
+        if profile_settings:
+            for key in self.DEFAULT_SETTINGS:
+                if key in profile_settings:
+                    resolved[key] = bool(profile_settings[key])
+        return resolved
+
+    def replace_placeholders(self, content, show_settings=None):
         """Replace placeholders in markdown content with actual data"""
+        show_settings = show_settings or self.DEFAULT_SETTINGS
+
         try:
             data = self.gather_data()
-        except Exception as e:
+        except Exception:
             # If gathering data fails, use empty data
             github_username = self.get_github_username()
             data = {
@@ -238,29 +260,43 @@ class ReadmeGenerator:
             "{{stats.private_repos}}", str(data["stats"].get("private_repos", 0))
         )
 
-        # Languages
-        languages = data.get("languages", [])
-        if languages:
-            lang_string = ", ".join(
-                [f"{lang['name']} ({lang['count']} repos)" for lang in languages]
-            )
-            content = content.replace("{{languages.top_5}}", lang_string)
+        # Languages - honor show_languages
+        if show_settings.get("show_languages", True):
+            languages = data.get("languages", [])
+            if languages:
+                lang_string = ", ".join(
+                    [f"{lang['name']} ({lang['count']} repos)" for lang in languages]
+                )
+                content = content.replace("{{languages.top_5}}", lang_string)
+            else:
+                content = content.replace(
+                    "{{languages.top_5}}", "No languages detected"
+                )
         else:
-            content = content.replace("{{languages.top_5}}", "No languages detected")
+            content = self._strip_placeholder_block(content, "{{languages.top_5}}")
 
-        # Contributions
-        contributions = data.get("contributions", {}).get("last_30_days", {})
-        content = content.replace(
-            "{{contributions.last_30_days.commits}}",
-            str(contributions.get("commits", 0)),
-        )
-        content = content.replace(
-            "{{contributions.last_30_days.prs}}",
-            str(contributions.get("pull_requests", 0)),
-        )
-        content = content.replace(
-            "{{contributions.last_30_days.issues}}", str(contributions.get("issues", 0))
-        )
+        # Contributions - honor show_contributions
+        if show_settings.get("show_contributions", True):
+            contributions = data.get("contributions", {}).get("last_30_days", {})
+            content = content.replace(
+                "{{contributions.last_30_days.commits}}",
+                str(contributions.get("commits", 0)),
+            )
+            content = content.replace(
+                "{{contributions.last_30_days.prs}}",
+                str(contributions.get("pull_requests", 0)),
+            )
+            content = content.replace(
+                "{{contributions.last_30_days.issues}}",
+                str(contributions.get("issues", 0)),
+            )
+        else:
+            for placeholder in (
+                "{{contributions.last_30_days.commits}}",
+                "{{contributions.last_30_days.prs}}",
+                "{{contributions.last_30_days.issues}}",
+            ):
+                content = self._strip_placeholder_block(content, placeholder)
 
         # Dates
         content = content.replace(
@@ -273,18 +309,29 @@ class ReadmeGenerator:
 
         # Stats card image - our own self-hosted SVG, not a third-party service
         username = self.get_github_username()
-        if username:
+        if show_settings.get("show_stats", True) and username:
             base_url = getattr(
                 settings, "SITE_URL", "https://gitstats-api-1i3g.onrender.com"
             )
-            stats_card_url = f"{base_url}/api/readme-card/stats/?username={username}"
+            stats_card_url = (
+                f"{base_url}/api/readme-profile/readme-card/stats/?username={username}"
+            )
             content = content.replace("{{stats_card_url}}", stats_card_url)
         else:
-            # No valid username - drop the whole image line rather than
-            # rendering a broken/empty src
+            # Either stats are turned off, or no valid username - drop the
+            # whole image line rather than rendering a broken/empty src.
             content = re.sub(r"!\[[^\]]*\]\(\{\{stats_card_url\}\}\)\n?", "", content)
 
         return content
+
+    @staticmethod
+    def _strip_placeholder_block(content, placeholder):
+        """When a section is toggled off, drop the line containing its
+        placeholder entirely rather than leaving a dangling label with
+        nothing after it (e.g. a table row with an empty cell)."""
+        lines = content.split("\n")
+        kept = [line for line in lines if placeholder not in line]
+        return "\n".join(kept)
 
     def generate_badges_section(self):
         """Generate GitHub badges markdown"""
@@ -309,7 +356,7 @@ class ReadmeGenerator:
 
             badges_line = " ".join(badges)
             return f'<div align="center">\n\n{badges_line}\n\n</div>'
-        except Exception as e:
+        except Exception:
             return ""
 
     def generate_activity_chart(self):
@@ -322,7 +369,7 @@ class ReadmeGenerator:
         base_url = getattr(
             settings, "SITE_URL", "https://gitstats-api-1i3g.onrender.com"
         )
-        return f'<div align="center">\n\n![Top Languages]({base_url}/api/readme-card/languages/?username={username})\n\n</div>'
+        return f'<div align="center">\n\n![Top Languages]({base_url}/api/readme-profile/readme-card/languages/?username={username})\n\n</div>'
 
     def get_user_content(self):
         """Get the user's content from their profile or use default"""
@@ -333,7 +380,7 @@ class ReadmeGenerator:
             return profile.content or self.get_default_template()
         except ReadmeProfile.DoesNotExist:
             return self.get_default_template()
-        except Exception as e:
+        except Exception:
             return self.get_default_template()
 
     def _strip_broken_github_images(self, content):
@@ -343,8 +390,6 @@ class ReadmeGenerator:
         placeholder and 404s with "could not find that user or
         organization" instead of just not rendering. Better to omit the
         image than show a broken error card."""
-        import re
-
         pattern = re.compile(
             r"!\[[^\]]*\]\("
             r"https://(?:github-readme-stats\.vercel\.app|"
@@ -352,8 +397,17 @@ class ReadmeGenerator:
         )
         return pattern.sub("", content)
 
-    def generate(self, template=None):
-        """Generate the final README content"""
+    def generate(self, template=None, profile_settings=None):
+        """Generate the final README content.
+
+        profile_settings should be the dict stored on ReadmeProfile.settings
+        (show_stats / show_languages / show_contributions /
+        show_activity_chart / show_badges). Any key not present defaults to
+        True so existing profiles created before these toggles existed keep
+        their current behavior.
+        """
+        show_settings = self._resolve_settings(profile_settings)
+
         try:
             # Get the template content
             if template:
@@ -361,8 +415,10 @@ class ReadmeGenerator:
             else:
                 content = self.get_user_content()
 
-            # Replace placeholders
-            content = self.replace_placeholders(content)
+            # Replace placeholders (this now also honors show_stats /
+            # show_languages / show_contributions and strips the
+            # corresponding lines when turned off)
+            content = self.replace_placeholders(content, show_settings)
 
             # If there's no real GitHub username on file, any stats/chart
             # image embedded in the template body would otherwise render
@@ -371,18 +427,24 @@ class ReadmeGenerator:
             if not self.get_github_username():
                 content = self._strip_broken_github_images(content)
 
-            # Add badges
-            badges = self.generate_badges_section()
-            if badges:
-                content = badges + "\n\n" + content
+            # Add badges - honor show_badges
+            if show_settings.get("show_badges", True):
+                badges = self.generate_badges_section()
+                if badges:
+                    content = badges + "\n\n" + content
 
-            # Add activity chart
-            chart = self.generate_activity_chart()
-            if chart:
-                content += "\n\n" + chart
+            # Add activity chart - honor show_activity_chart. This was
+            # previously appended unconditionally, which is why disabling
+            # it in profile settings never actually removed it, and why
+            # it duplicated the plain-text {{languages.top_5}} list that's
+            # already in the default template body.
+            if show_settings.get("show_activity_chart", True):
+                chart = self.generate_activity_chart()
+                if chart:
+                    content += "\n\n" + chart
 
             return content
-        except Exception as e:
+        except Exception:
             # Return a simple default if everything fails
             name = self.get_github_username() or self.user.username
             return f"""# Hi there, I'm {name}!

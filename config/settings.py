@@ -27,6 +27,8 @@ ALLOWED_HOSTS = os.environ.get(
     "ALLOWED_HOSTS", "localhost,127.0.0.1,.onrender.com,.netlify.app"
 ).split(",")
 
+SITE_URL = os.environ.get("SITE_URL", "https://gitstats-api-1i3g.onrender.com")
+
 # CORS configuration
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",

@@ -57,9 +57,9 @@ class ReadmeProfileViewSet(ModelViewSet):
             # Get or create profile
             profile = self.get_or_create_profile()
 
-            # Generate content
+            # Generate content, honoring this profile's show_* toggles
             generator = ReadmeGenerator(request.user)
-            generated_content = generator.generate()
+            generated_content = generator.generate(profile_settings=profile.settings)
 
             # Update profile with generated content
             profile.content = generated_content
@@ -90,7 +90,7 @@ class ReadmeProfileViewSet(ModelViewSet):
                 ReadmeGenerationHistory.objects.create(
                     profile=profile, status="failed", error_message=str(e)
                 )
-            except:
+            except Exception:
                 pass
 
             return Response(
@@ -104,8 +104,8 @@ class ReadmeProfileViewSet(ModelViewSet):
         profile = self.get_or_create_profile()
         generator = ReadmeGenerator(request.user)
 
-        # Generate fresh content
-        content = generator.generate()
+        # Generate fresh content, honoring this profile's show_* toggles
+        content = generator.generate(profile_settings=profile.settings)
 
         # Update last_generated
         profile.last_generated = timezone.now()
@@ -126,7 +126,7 @@ class ReadmeProfileViewSet(ModelViewSet):
         profile = self.get_or_create_profile()
         generator = ReadmeGenerator(request.user)
 
-        content = generator.generate()
+        content = generator.generate(profile_settings=profile.settings)
 
         return Response(
             {
