@@ -12,13 +12,36 @@ class ReadmeGenerator:
         self.user = user
         self.data = {}
 
+    def get_github_username(self):
+        """Get the correct GitHub username for the user"""
+        # Try to get from github_username field if it exists
+        if hasattr(self.user, "github_username") and self.user.github_username:
+            # Check if it's not a numeric ID (github_123456789)
+            if not self.user.github_username.startswith("github_"):
+                return self.user.github_username
+
+        # Check if username is a numeric ID
+        if self.user.username and self.user.username.startswith("github_"):
+            # Return the correct GitHub username
+            # You can either hardcode it or get it from the user's GitHub data
+            # For now, let's use the display_name or fallback
+            if self.user.display_name and not self.user.display_name.startswith(
+                "github_"
+            ):
+                return self.user.display_name
+
+        # Fallback to username
+        return self.user.username
+
     def gather_data(self):
         """Gather all analytics data for the user"""
+        github_username = self.get_github_username()
+
         try:
             # Basic user info
             self.data["user"] = {
-                "name": self.user.display_name or self.user.username,
-                "username": self.user.username,
+                "name": self.user.display_name or github_username,
+                "username": github_username,  # Use the correct GitHub username
                 "bio": self.user.bio or "",
                 "location": self.user.location or "",
                 "company": self.user.company or "",
@@ -30,8 +53,8 @@ class ReadmeGenerator:
         except Exception as e:
             # Fallback user data
             self.data["user"] = {
-                "name": self.user.username,
-                "username": self.user.username,
+                "name": github_username,
+                "username": github_username,
                 "bio": "",
                 "location": "",
                 "company": "",
@@ -64,6 +87,25 @@ class ReadmeGenerator:
                 "public_repos": 0,
                 "private_repos": 0,
             }
+
+        try:
+            # Top 5 languages
+            language_stats = {}
+            repos = Repository.objects.filter(user=self.user)
+            for repo in repos:
+                if repo.primary_language:
+                    language_stats[repo.primary_language] = (
+                        language_stats.get(repo.primary_language, 0) + 1
+                    )
+
+            sorted_languages = sorted(
+                language_stats.items(), key=lambda x: x[1], reverse=True
+            )[:5]
+            self.data["languages"] = [
+                {"name": lang, "count": count} for lang, count in sorted_languages
+            ]
+        except Exception as e:
+            self.data["languages"] = []
 
         try:
             # Top repositories (most starred)
@@ -125,10 +167,11 @@ class ReadmeGenerator:
             data = self.gather_data()
         except Exception as e:
             # If gathering data fails, use empty data
+            github_username = self.get_github_username()
             data = {
                 "user": {
-                    "name": self.user.username,
-                    "username": self.user.username,
+                    "name": github_username,
+                    "username": github_username,
                     "bio": "",
                     "location": "",
                     "company": "",
@@ -143,6 +186,7 @@ class ReadmeGenerator:
                     "public_repos": 0,
                     "private_repos": 0,
                 },
+                "languages": [],
                 "contributions": {
                     "last_30_days": {
                         "commits": 0,
@@ -159,12 +203,13 @@ class ReadmeGenerator:
             "{{user.name}}",
             str(
                 data["user"].get(
-                    "name", data["user"].get("username", self.user.username)
+                    "name", data["user"].get("username", self.get_github_username())
                 )
             ),
         )
         content = content.replace(
-            "{{user.username}}", str(data["user"].get("username", self.user.username))
+            "{{user.username}}",
+            str(data["user"].get("username", self.get_github_username())),
         )
         content = content.replace("{{user.bio}}", str(data["user"].get("bio", "")))
         content = content.replace(
@@ -197,6 +242,16 @@ class ReadmeGenerator:
         content = content.replace(
             "{{stats.private_repos}}", str(data["stats"].get("private_repos", 0))
         )
+
+        # Languages
+        languages = data.get("languages", [])
+        if languages:
+            lang_string = ", ".join(
+                [f"{lang['name']} ({lang['count']} repos)" for lang in languages]
+            )
+            content = content.replace("{{languages.top_5}}", lang_string)
+        else:
+            content = content.replace("{{languages.top_5}}", "No languages detected")
 
         # Contributions
         contributions = data.get("contributions", {}).get("last_30_days", {})
@@ -250,40 +305,10 @@ class ReadmeGenerator:
             return ""
 
     def generate_activity_chart(self):
-        """Generate GitHub activity chart"""
+        """Generate a simple text-based activity chart"""
         try:
-            return f'<div align="center">\n\n![GitHub Activity](https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username={self.user.username})\n\n</div>'
-        except Exception as e:
-            return ""
-
-    def generate_commit_analytics(self):
-        """Generate commit analytics section with detailed breakdown"""
-        try:
-            data = self.gather_data()
-            contributions = data.get("contributions", {}).get("last_30_days", {})
-
-            # Get commit activity by week for the last 30 days
-            # This would be more detailed if you have per-week commit data
-
-            analytics = f"""
-## 📊 Commit Analytics
-
-### Last 30 Days Summary
-
-| Metric | Count |
-|---|---|
-| Total Commits | {contributions.get('commits', 0)} |
-| Pull Requests | {contributions.get('pull_requests', 0)} |
-| Issues Created | {contributions.get('issues', 0)} |
-
-### Commit Frequency
-
-- Daily Average: {round(contributions.get('commits', 0) / 30, 1)} commits/day
-- PR Average: {round(contributions.get('pull_requests', 0) / 30, 1)} PRs/day
-
----
-"""
-            return analytics
+            username = self.get_github_username()
+            return f'<div align="center">\n\n![GitHub Activity](https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username={username})\n\n</div>'
         except Exception as e:
             return ""
 
@@ -316,11 +341,6 @@ class ReadmeGenerator:
             if badges:
                 content = badges + "\n\n" + content
 
-            # Add commit analytics
-            commit_analytics = self.generate_commit_analytics()
-            if commit_analytics:
-                content += "\n\n" + commit_analytics
-
             # Add activity chart
             chart = self.generate_activity_chart()
             if chart:
@@ -329,7 +349,7 @@ class ReadmeGenerator:
             return content
         except Exception as e:
             # Return a simple default if everything fails
-            return f"""# Hi there, I'm {self.user.username}!
+            return f"""# Hi there, I'm {self.get_github_username()}!
 
 Welcome to my GitHub profile!
 
@@ -358,6 +378,8 @@ Welcome to my GitHub profile!
 
 ![GitHub Stats](https://github-readme-stats.vercel.app/api?username={{user.username}}&show_icons=true&hide_title=true&count_private=true)
 
+### Activity Summary
+
 | Metric | Count |
 |---|---|
 | Total Repositories | {{stats.total_repos}} |
@@ -366,7 +388,11 @@ Welcome to my GitHub profile!
 | Public Repos | {{stats.public_repos}} |
 | Private Repos | {{stats.private_repos}} |
 
-## Recent Activity (Last 30 Days)
+### Top Languages
+
+{{languages.top_5}}
+
+### Recent Activity (Last 30 Days)
 
 | Type | Count |
 |---|---|
