@@ -13,6 +13,11 @@ class User(AbstractUser):
 
     # Only keep what we need
     github_id = models.BigIntegerField(unique=True, null=True, blank=True)
+    # NEW: the real GitHub handle (GitHub API's "login" field, e.g.
+    # "johndoe"). This is what's actually valid to use in profile URLs
+    # and badge/stat-card services - `username` is our own internal
+    # unique field and can be a "github_<id>" placeholder.
+    github_username = models.CharField(max_length=255, null=True, blank=True)
     display_name = models.CharField(max_length=255, null=True, blank=True)
     avatar_url = models.TextField(null=True, blank=True)
     bio = models.TextField(null=True, blank=True)
@@ -40,4 +45,5 @@ class User(AbstractUser):
             models.Index(fields=["username"]),
             models.Index(fields=["email"]),
             models.Index(fields=["github_id"]),
+            models.Index(fields=["github_username"]),
         ]

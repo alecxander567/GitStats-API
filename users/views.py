@@ -81,12 +81,23 @@ class FirebaseAuthView(APIView):
                 except Exception as e:
                     print(f"Error fetching GitHub data: {e}")
 
+            # The real GitHub handle is the "login" field from /user -
+            # NOT "name" (that's the person's display name and can have
+            # spaces/punctuation). This is what's valid in profile URLs
+            # and badge/stat services.
+            real_github_username = github_user_data.get("login") or None
+
             user, created = User.objects.get_or_create(
                 github_id=github_id,
                 defaults={
-                    "username": f"github_{github_id}",
+                    # Use the real login for `username` too when we have
+                    # it, so new users don't get stuck with a
+                    # "github_<id>" placeholder from day one.
+                    "username": real_github_username or f"github_{github_id}",
+                    "github_username": real_github_username,
                     "display_name": firebase_user.display_name
                     or github_user_data.get("name")
+                    or real_github_username
                     or "User",
                     "email": firebase_user.email or github_user_data.get("email") or "",
                     "avatar_url": firebase_user.photo_url
@@ -129,6 +140,12 @@ class FirebaseAuthView(APIView):
                     user.avatar_url = (
                         github_user_data.get("avatar_url") or user.avatar_url
                     )
+                # Backfill/refresh the real GitHub username whenever we
+                # manage to get one. This heals every existing user
+                # (including "github_162329514"-style accounts) the
+                # next time they log in.
+                if real_github_username:
+                    user.github_username = real_github_username
                 user.display_name = firebase_user.display_name or user.display_name
                 user.email = firebase_user.email or user.email
                 user.avatar_url = firebase_user.photo_url or user.avatar_url
@@ -140,6 +157,7 @@ class FirebaseAuthView(APIView):
             user_data = {
                 "id": user.id,
                 "username": user.username,
+                "github_username": user.github_username,
                 "email": user.email,
                 "display_name": user.display_name,
                 "avatar_url": user.avatar_url,
@@ -177,6 +195,7 @@ class UserMeView(APIView):
         user_data = {
             "id": request.user.id,
             "username": request.user.username,
+            "github_username": request.user.github_username,
             "email": request.user.email,
             "display_name": request.user.display_name,
             "avatar_url": request.user.avatar_url,
@@ -210,6 +229,9 @@ class UserLogoutView(APIView):
 
 
 class AddGitHubTokenView(APIView):
+    """Called by the frontend's `syncGithub()` - re-validates the stored
+    GitHub token and refreshes profile stats."""
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -237,6 +259,11 @@ class AddGitHubTokenView(APIView):
 
             user = request.user
             user.github_token = github_token
+            # This is the other place a user can end up connecting their
+            # account (via "Sync repos" in the frontend) - capture/heal
+            # github_username here too, not just at initial login.
+            if github_data.get("login"):
+                user.github_username = github_data["login"]
             user.display_name = github_data.get("name") or user.display_name
             user.avatar_url = github_data.get("avatar_url") or user.avatar_url
             user.bio = github_data.get("bio", user.bio or "")
@@ -251,6 +278,7 @@ class AddGitHubTokenView(APIView):
             return Response(
                 {
                     "message": "GitHub token added successfully",
+                    "github_username": user.github_username,
                     "github_token": user.github_token,
                     "followers": user.followers,
                     "following": user.following,
