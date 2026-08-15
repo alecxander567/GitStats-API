@@ -190,15 +190,12 @@ class CategoryService:
             if category_name:
                 confidence = self.calculate_confidence(repo, category_name)
 
+                # Only save the fields that exist in the model
                 ProjectCategory.objects.update_or_create(
                     repository=repo,
                     defaults={
                         "category": category_name,
                         "confidence": confidence,
-                        "repository_name": repo.name,
-                        "repository_display_name": repo.full_name,
-                        "repository_username": repo.user.username,
-                        "repository_language": repo.primary_language or "Unknown",
                     },
                 )
                 count += 1
