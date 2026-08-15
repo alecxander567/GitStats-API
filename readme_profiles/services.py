@@ -321,6 +321,22 @@ class ReadmeGenerator:
         except Exception as e:
             return self.get_default_template()
 
+    def _strip_broken_github_images(self, content):
+        """Remove any github-readme-stats / github-profile-summary-cards
+        image embeds from content. These build their URL from a GitHub
+        username - if we don't have a real one, the URL contains a fake
+        placeholder and 404s with "could not find that user or
+        organization" instead of just not rendering. Better to omit the
+        image than show a broken error card."""
+        import re
+
+        pattern = re.compile(
+            r"!\[[^\]]*\]\("
+            r"https://(?:github-readme-stats\.vercel\.app|"
+            r"github-profile-summary-cards\.vercel\.app)[^)]*\)"
+        )
+        return pattern.sub("", content)
+
     def generate(self, template=None):
         """Generate the final README content"""
         try:
@@ -332,6 +348,13 @@ class ReadmeGenerator:
 
             # Replace placeholders
             content = self.replace_placeholders(content)
+
+            # If there's no real GitHub username on file, any stats/chart
+            # image embedded in the template body would otherwise render
+            # with a fake placeholder username and show a broken "could
+            # not find that user or organization" error card.
+            if not self.get_github_username():
+                content = self._strip_broken_github_images(content)
 
             # Add badges
             badges = self.generate_badges_section()
