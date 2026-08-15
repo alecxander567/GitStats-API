@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ReadmeProfileViewSet
+from .views import ReadmeProfileViewSet, ReadmeStatsCardView, ReadmeLanguagesCardView
 
 router = DefaultRouter()
 router.register(r"profile", ReadmeProfileViewSet, basename="readme-profile")
@@ -29,4 +29,10 @@ urlpatterns = [
     # Router still handles create fallback and all @action routes:
     # regenerate/, export/, preview/, toggle_auto_update/, history/, templates/
     path("", include(router.urls)),
+    path("readme-card/stats/", ReadmeStatsCardView.as_view(), name="readme-stats-card"),
+    path(
+        "readme-card/languages/",
+        ReadmeLanguagesCardView.as_view(),
+        name="readme-languages-card",
+    ),
 ]

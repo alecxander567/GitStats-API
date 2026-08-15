@@ -1,6 +1,8 @@
 from django.db.models import Sum
 from django.utils import timezone
+from django.conf import settings
 from datetime import timedelta
+import re
 from repositories.models import Repository
 from analytics.models import ContributorActivity
 
@@ -269,6 +271,19 @@ class ReadmeGenerator:
             "{{current_year}}", str(data.get("current_year", timezone.now().year))
         )
 
+        # Stats card image - our own self-hosted SVG, not a third-party service
+        username = self.get_github_username()
+        if username:
+            base_url = getattr(
+                settings, "SITE_URL", "https://gitstats-api-1i3g.onrender.com"
+            )
+            stats_card_url = f"{base_url}/api/readme-card/stats/?username={username}"
+            content = content.replace("{{stats_card_url}}", stats_card_url)
+        else:
+            # No valid username - drop the whole image line rather than
+            # rendering a broken/empty src
+            content = re.sub(r"!\[[^\]]*\]\(\{\{stats_card_url\}\}\)\n?", "", content)
+
         return content
 
     def generate_badges_section(self):
@@ -298,16 +313,16 @@ class ReadmeGenerator:
             return ""
 
     def generate_activity_chart(self):
-        """Generate a simple text-based activity chart.
-
-        Returns "" when there's no real GitHub username on file, instead
-        of building a URL with a fake 'github_<id>' value that 404s with
-        "could not find the organization".
-        """
+        """Embed our own languages card instead of a third-party image
+        service - built from the same data we already have, served from
+        our own domain, no external lookups that can 404."""
         username = self.get_github_username()
         if not username:
             return ""
-        return f'<div align="center">\n\n![GitHub Activity](https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username={username})\n\n</div>'
+        base_url = getattr(
+            settings, "SITE_URL", "https://gitstats-api-1i3g.onrender.com"
+        )
+        return f'<div align="center">\n\n![Top Languages]({base_url}/api/readme-card/languages/?username={username})\n\n</div>'
 
     def get_user_content(self):
         """Get the user's content from their profile or use default"""
@@ -397,7 +412,7 @@ Welcome to my GitHub profile!
 
 ## GitHub Stats
 
-![GitHub Stats](https://github-readme-stats.vercel.app/api?username={{user.username}}&show_icons=true&hide_title=true&count_private=true)
+![GitHub Stats]({{stats_card_url}})
 
 ### Activity Summary
 
