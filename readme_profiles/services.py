@@ -200,19 +200,20 @@ class ReadmeGenerator:
         base_url = self._card_base_url()
         imgs = []
 
-        if show_settings.get("show_stats", True):
-            stats_url = (
-                f"{base_url}/api/readme-profile/readme-card/stats/"
-                f"?username={username}"
-            )
-            imgs.append(f'<img src="{stats_url}" alt="GitHub Stats" width="48%" />')
-
+        # Languages card first, stats card second (display order).
         if show_settings.get("show_activity_chart", True):
             lang_url = (
                 f"{base_url}/api/readme-profile/readme-card/languages/"
                 f"?username={username}"
             )
             imgs.append(f'<img src="{lang_url}" alt="Top Languages" width="48%" />')
+
+        if show_settings.get("show_stats", True):
+            stats_url = (
+                f"{base_url}/api/readme-profile/readme-card/stats/"
+                f"?username={username}"
+            )
+            imgs.append(f'<img src="{stats_url}" alt="GitHub Stats" width="48%" />')
 
         if not imgs:
             return ""
