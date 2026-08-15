@@ -13,25 +13,18 @@ class ReadmeGenerator:
         self.data = {}
 
     def get_github_username(self):
-        """Get the correct GitHub username for the user"""
-        # Try to get from github_username field if it exists
+        """Get the correct GitHub username for the user, or None if we
+        don't have a real one on file. Never falls back to
+        self.user.username, since that can be a 'github_<id>' placeholder
+        that breaks every GitHub badge/API URL built from it."""
         if hasattr(self.user, "github_username") and self.user.github_username:
-            # Check if it's not a numeric ID (github_123456789)
             if not self.user.github_username.startswith("github_"):
                 return self.user.github_username
 
-        # Check if username is a numeric ID
-        if self.user.username and self.user.username.startswith("github_"):
-            # Return the correct GitHub username
-            # You can either hardcode it or get it from the user's GitHub data
-            # For now, let's use the display_name or fallback
-            if self.user.display_name and not self.user.display_name.startswith(
-                "github_"
-            ):
-                return self.user.display_name
+        if self.user.display_name and not self.user.display_name.startswith("github_"):
+            return self.user.display_name
 
-        # Fallback to username
-        return self.user.username
+        return None
 
     def gather_data(self):
         """Gather all analytics data for the user"""
@@ -40,8 +33,8 @@ class ReadmeGenerator:
         try:
             # Basic user info
             self.data["user"] = {
-                "name": self.user.display_name or github_username,
-                "username": github_username,  # Use the correct GitHub username
+                "name": self.user.display_name or github_username or self.user.username,
+                "username": github_username,  # may be None - handle downstream
                 "bio": self.user.bio or "",
                 "location": self.user.location or "",
                 "company": self.user.company or "",
@@ -53,7 +46,7 @@ class ReadmeGenerator:
         except Exception as e:
             # Fallback user data
             self.data["user"] = {
-                "name": github_username,
+                "name": github_username or self.user.username,
                 "username": github_username,
                 "bio": "",
                 "location": "",
@@ -170,7 +163,7 @@ class ReadmeGenerator:
             github_username = self.get_github_username()
             data = {
                 "user": {
-                    "name": github_username,
+                    "name": github_username or self.user.username,
                     "username": github_username,
                     "bio": "",
                     "location": "",
@@ -198,19 +191,17 @@ class ReadmeGenerator:
                 "current_year": timezone.now().year,
             }
 
+        # Fall back to a safe, non-None display value for the username
+        # placeholder so we never render the literal string "None" into
+        # the markdown or a broken github.com/None link.
+        display_username = data["user"].get("username") or self.user.username
+
         # User placeholders
         content = content.replace(
             "{{user.name}}",
-            str(
-                data["user"].get(
-                    "name", data["user"].get("username", self.get_github_username())
-                )
-            ),
+            str(data["user"].get("name", display_username)),
         )
-        content = content.replace(
-            "{{user.username}}",
-            str(data["user"].get("username", self.get_github_username())),
-        )
+        content = content.replace("{{user.username}}", str(display_username))
         content = content.replace("{{user.bio}}", str(data["user"].get("bio", "")))
         content = content.replace(
             "{{user.location}}", str(data["user"].get("location", ""))
@@ -305,12 +296,16 @@ class ReadmeGenerator:
             return ""
 
     def generate_activity_chart(self):
-        """Generate a simple text-based activity chart"""
-        try:
-            username = self.get_github_username()
-            return f'<div align="center">\n\n![GitHub Activity](https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username={username})\n\n</div>'
-        except Exception as e:
+        """Generate a simple text-based activity chart.
+
+        Returns "" when there's no real GitHub username on file, instead
+        of building a URL with a fake 'github_<id>' value that 404s with
+        "could not find the organization".
+        """
+        username = self.get_github_username()
+        if not username:
             return ""
+        return f'<div align="center">\n\n![GitHub Activity](https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username={username})\n\n</div>'
 
     def get_user_content(self):
         """Get the user's content from their profile or use default"""
@@ -349,7 +344,8 @@ class ReadmeGenerator:
             return content
         except Exception as e:
             # Return a simple default if everything fails
-            return f"""# Hi there, I'm {self.get_github_username()}!
+            name = self.get_github_username() or self.user.username
+            return f"""# Hi there, I'm {name}!
 
 Welcome to my GitHub profile!
 
