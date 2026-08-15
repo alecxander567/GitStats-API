@@ -1,3 +1,4 @@
+import json
 import firebase_admin
 from firebase_admin import auth, credentials
 from django.conf import settings
@@ -14,17 +15,20 @@ import os
 import requests
 from rest_framework import generics, permissions
 
-
-cred_path = os.environ.get("FIREBASE_CREDENTIALS", "firebase-credentials.json")
+# Firebase credentials are loaded from an env var containing the full
+# service account JSON (not a file path) - this works on hosts like
+# Render where you can't commit the credentials file to the repo.
+firebase_creds_json = os.environ.get("FIREBASE_CREDENTIALS_JSON")
 
 if not firebase_admin._apps:
     try:
-        if os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
+        if firebase_creds_json:
+            cred_dict = json.loads(firebase_creds_json)
+            cred = credentials.Certificate(cred_dict)
             firebase_admin.initialize_app(cred)
-            print(f"Firebase initialized with credentials from: {cred_path}")
+            print("Firebase initialized from FIREBASE_CREDENTIALS_JSON env var")
         else:
-            print(f"Firebase credentials file not found at: {cred_path}")
+            print("FIREBASE_CREDENTIALS_JSON env var not set")
     except Exception as e:
         print(f"Error initializing Firebase: {e}")
 
@@ -327,19 +331,22 @@ class UserListView(generics.ListAPIView):
     """
     List all users - for search functionality
     """
+
     permission_classes = [IsAuthenticated]
     serializer_class = UserSerializer
-    
+
     def get_queryset(self):
-        queryset = User.objects.all().only('id', 'username', 'email', 'display_name', 'avatar_url')
-        
+        queryset = User.objects.all().only(
+            "id", "username", "email", "display_name", "avatar_url"
+        )
+
         # Add search filtering
-        search = self.request.query_params.get('q', '')
+        search = self.request.query_params.get("q", "")
         if search:
             queryset = queryset.filter(
-                Q(username__icontains=search) |
-                Q(email__icontains=search) |
-                Q(display_name__icontains=search)
+                Q(username__icontains=search)
+                | Q(email__icontains=search)
+                | Q(display_name__icontains=search)
             )
-        
+
         return queryset[:50]  # Limit results
