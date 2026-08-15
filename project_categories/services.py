@@ -11,6 +11,10 @@ class CategoryService:
 
     def __init__(self):
         self.category_map = self._get_category_map()
+        # Pre-sort keys longest-first so multi-word/more specific keys
+        # (e.g. "react native") win over short, generic ones (e.g. "c", "r")
+        # when we fall back to substring matching.
+        self._sorted_keys = sorted(self.category_map, key=len, reverse=True)
 
     def _get_category_map(self):
         """Get the mapping of languages to categories - matching the model choices"""
@@ -118,7 +122,8 @@ class CategoryService:
             "oauth": "API",
             # Python
             "python": "Web",
-            # Default
+            # Default / long tail (duplicate keys collapse to one entry each,
+            # which is fine since they all map to the same category)
             "perl": "CLI",
             "elixir": "Web",
             "erlang": "Web",
@@ -128,16 +133,6 @@ class CategoryService:
             "assembly": "IoT",
             "system": "IoT",
             "lua": "Game",
-            "perl": "CLI",
-            "elixir": "Web",
-            "erlang": "Web",
-            "haskell": "CLI",
-            "scala": "API",
-            "clojure": "Web",
-            "assembly": "IoT",
-            "system": "IoT",
-            "lua": "Game",
-            "perl": "CLI",
         }
 
     def get_category_for_language(self, language):
@@ -151,10 +146,13 @@ class CategoryService:
         if language_lower in self.category_map:
             return self.category_map[language_lower]
 
-        # Check for partial matches
-        for key, category in self.category_map.items():
+        # Check for partial matches, longest key first, so specific keys
+        # (e.g. "react native") take priority over short, generic ones
+        # (e.g. "c", "r", "go") that could otherwise match by accident
+        # as a substring of an unrelated language name.
+        for key in self._sorted_keys:
             if key in language_lower:
-                return category
+                return self.category_map[key]
 
         return "Other"
 
@@ -229,11 +227,17 @@ class CategoryService:
             if category_name:
                 confidence = self.calculate_confidence(repo, category_name)
 
-                # Only save the fields that exist in the model
+                # `category` must be part of the lookup (not just `defaults`)
+                # to match the model's unique_together = ["repository", "category"].
+                # Without it, update_or_create() effectively does
+                # .get(repository=repo), which either overwrites an
+                # unrelated existing category row for that repo, or raises
+                # MultipleObjectsReturned once a repo has more than one
+                # category row (e.g. created via the bulk_create endpoint).
                 ProjectCategory.objects.update_or_create(
                     repository=repo,
+                    category=category_name,
                     defaults={
-                        "category": category_name,
                         "confidence": confidence,
                     },
                 )
