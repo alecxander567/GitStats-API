@@ -66,25 +66,6 @@ class ReadmeGenerator:
             }
 
         try:
-            # Top 5 languages
-            language_stats = {}
-            repos = Repository.objects.filter(user=self.user)
-            for repo in repos:
-                if repo.primary_language:
-                    language_stats[repo.primary_language] = (
-                        language_stats.get(repo.primary_language, 0) + 1
-                    )
-
-            sorted_languages = sorted(
-                language_stats.items(), key=lambda x: x[1], reverse=True
-            )[:5]
-            self.data["languages"] = [
-                {"name": lang, "count": count} for lang, count in sorted_languages
-            ]
-        except Exception as e:
-            self.data["languages"] = []
-
-        try:
             # Top repositories (most starred)
             repos = Repository.objects.filter(user=self.user).order_by("-stars")[:5]
             self.data["top_repos"] = [
@@ -162,7 +143,6 @@ class ReadmeGenerator:
                     "public_repos": 0,
                     "private_repos": 0,
                 },
-                "languages": [],
                 "contributions": {
                     "last_30_days": {
                         "commits": 0,
@@ -218,16 +198,6 @@ class ReadmeGenerator:
             "{{stats.private_repos}}", str(data["stats"].get("private_repos", 0))
         )
 
-        # Languages
-        languages = data.get("languages", [])
-        if languages:
-            lang_string = ", ".join(
-                [f"{lang['name']} ({lang['count']} repos)" for lang in languages]
-            )
-            content = content.replace("{{languages.top_5}}", lang_string)
-        else:
-            content = content.replace("{{languages.top_5}}", "No languages detected")
-
         # Contributions
         contributions = data.get("contributions", {}).get("last_30_days", {})
         content = content.replace(
@@ -280,9 +250,40 @@ class ReadmeGenerator:
             return ""
 
     def generate_activity_chart(self):
-        """Generate a simple text-based activity chart"""
+        """Generate GitHub activity chart"""
         try:
             return f'<div align="center">\n\n![GitHub Activity](https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username={self.user.username})\n\n</div>'
+        except Exception as e:
+            return ""
+
+    def generate_commit_analytics(self):
+        """Generate commit analytics section with detailed breakdown"""
+        try:
+            data = self.gather_data()
+            contributions = data.get("contributions", {}).get("last_30_days", {})
+
+            # Get commit activity by week for the last 30 days
+            # This would be more detailed if you have per-week commit data
+
+            analytics = f"""
+## 📊 Commit Analytics
+
+### Last 30 Days Summary
+
+| Metric | Count |
+|---|---|
+| Total Commits | {contributions.get('commits', 0)} |
+| Pull Requests | {contributions.get('pull_requests', 0)} |
+| Issues Created | {contributions.get('issues', 0)} |
+
+### Commit Frequency
+
+- Daily Average: {round(contributions.get('commits', 0) / 30, 1)} commits/day
+- PR Average: {round(contributions.get('pull_requests', 0) / 30, 1)} PRs/day
+
+---
+"""
+            return analytics
         except Exception as e:
             return ""
 
@@ -314,6 +315,11 @@ class ReadmeGenerator:
             badges = self.generate_badges_section()
             if badges:
                 content = badges + "\n\n" + content
+
+            # Add commit analytics
+            commit_analytics = self.generate_commit_analytics()
+            if commit_analytics:
+                content += "\n\n" + commit_analytics
 
             # Add activity chart
             chart = self.generate_activity_chart()
@@ -359,10 +365,6 @@ Welcome to my GitHub profile!
 | Total Forks | {{stats.total_forks}} |
 | Public Repos | {{stats.public_repos}} |
 | Private Repos | {{stats.private_repos}} |
-
-## Top Languages
-
-{{languages.top_5}}
 
 ## Recent Activity (Last 30 Days)
 
