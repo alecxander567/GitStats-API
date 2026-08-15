@@ -318,11 +318,57 @@ class ReadmeGenerator:
             )
             content = content.replace("{{stats_card_url}}", stats_card_url)
         else:
+            stats_card_url = None
             # Either stats are turned off, or no valid username - drop the
             # whole image line rather than rendering a broken/empty src.
             content = re.sub(r"!\[[^\]]*\]\(\{\{stats_card_url\}\}\)\n?", "", content)
 
+        # Also normalize/strip any stats card image that's already baked
+        # into content from a prior generation (the {{stats_card_url}}
+        # token above won't exist anymore once content has been
+        # generated once, so that replace() alone is a no-op on it).
+        content = self._normalize_stats_card_image(content, stats_card_url)
+
         return content
+
+    @staticmethod
+    def _strip_previous_badges(content):
+        """Remove any badges block already baked into content from a
+        prior generation. Without this, calling generate() again on
+        already-generated content (which is what happens today, since
+        regenerate() saves the resolved output back into profile.content)
+        prepends a second badges block on top of the first, and a third
+        on the next regenerate, etc."""
+        pattern = re.compile(
+            r'<div align="center">\s*\n\n[^\n<]*img\.shields\.io/badge/Repos-[^\n<]*\n\n</div>\s*\n*',
+            re.DOTALL,
+        )
+        return pattern.sub("", content)
+
+    @staticmethod
+    def _strip_previous_activity_chart(content):
+        """Same idea as _strip_previous_badges, but for the appended
+        'Top Languages' image chart. Also cleans up stale copies left
+        over from before the /api/readme-profile/ URL prefix fix, since
+        those won't match the freshly-built URL and would otherwise
+        linger alongside the corrected one forever."""
+        pattern = re.compile(
+            r'<div align="center">\s*\n\n!\[Top Languages\]\([^)]*\)\s*\n\n</div>\s*\n*',
+            re.DOTALL,
+        )
+        return pattern.sub("", content)
+
+    @staticmethod
+    def _normalize_stats_card_image(content, new_url):
+        """Fix up an already-baked '![GitHub Stats](...)' line in stored
+        content to point at the current, correct URL - or strip it if
+        stats are disabled / there's no username. Needed because once
+        content has been generated once, {{stats_card_url}} no longer
+        exists in it for replace_placeholders() to substitute into."""
+        pattern = re.compile(r"!\[GitHub Stats\]\([^)]*\)")
+        if new_url:
+            return pattern.sub(f"![GitHub Stats]({new_url})", content)
+        return pattern.sub("", content)
 
     @staticmethod
     def _strip_placeholder_block(content, placeholder):
@@ -419,6 +465,12 @@ class ReadmeGenerator:
             # show_languages / show_contributions and strips the
             # corresponding lines when turned off)
             content = self.replace_placeholders(content, show_settings)
+
+            # Strip any badges/chart blocks already baked in from a prior
+            # generation before re-adding fresh ones below, so repeated
+            # regenerate() calls don't keep stacking duplicates.
+            content = self._strip_previous_badges(content)
+            content = self._strip_previous_activity_chart(content)
 
             # If there's no real GitHub username on file, any stats/chart
             # image embedded in the template body would otherwise render

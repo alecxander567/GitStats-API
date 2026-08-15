@@ -57,12 +57,19 @@ class ReadmeProfileViewSet(ModelViewSet):
             # Get or create profile
             profile = self.get_or_create_profile()
 
-            # Generate content, honoring this profile's show_* toggles
+            # Generate content, honoring this profile's show_* toggles.
+            # profile.content stays untouched here - it's the raw editable
+            # template. The resolved output goes into generated_content,
+            # which is what gets displayed/exported. Previously this
+            # overwrote profile.content itself, which destroyed the
+            # {{placeholders}} in it - every regenerate() after the first
+            # was just re-injecting badges/chart on top of already-baked
+            # output instead of actually recomputing anything.
             generator = ReadmeGenerator(request.user)
             generated_content = generator.generate(profile_settings=profile.settings)
 
-            # Update profile with generated content
-            profile.content = generated_content
+            # Save the resolved output separately from the template
+            profile.generated_content = generated_content
             profile.last_generated = timezone.now()
             profile.save()
 

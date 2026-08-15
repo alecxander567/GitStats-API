@@ -26,6 +26,13 @@ class ReadmeProfile(models.Model):
         default="",
         help_text="Markdown content with placeholders like {{user.name}}, {{stats.total_stars}}, etc.",
     )
+    generated_content = models.TextField(
+        default="",
+        blank=True,
+        help_text="Last fully-resolved output (placeholders filled in, badges/chart "
+        "injected). This is what gets displayed/exported - `content` above stays "
+        "as the raw editable template and is never overwritten by generation.",
+    )
     template = models.CharField(
         max_length=50, choices=TEMPLATE_CHOICES, default="modern"
     )
